@@ -27,30 +27,47 @@ function collectCreateTableBlocks(sql: string) {
 }
 
 function parseColumns(body: string): { columns: Column[]; pk: string[] } {
-    // split by lines/commas but keep constraint lines intact
-    const rawLines = body
-        .split(/\n/)
-        .map(l => l.trim())
-        .filter(Boolean);
-
+    // Better parsing: track parentheses depth to handle multi-line constraints
     const items: string[] = [];
     let buf = '';
-    for (const line of rawLines) {
-        buf += (buf ? ' ' : '') + line;
-        if (/,(\s*--.*)?$/.test(line) || /\)$/.test(line)) {
-            // end of definition likely marked by comma or closing constraint
-            items.push(buf.replace(/,+$/, '').trim());
+    let depth = 0;
+
+    for (let i = 0; i < body.length; i++) {
+        const char = body[i];
+
+        if (char === '(') depth++;
+        if (char === ')') depth--;
+
+        buf += char;
+
+        // Split on comma only at depth 0 (not inside parentheses)
+        if (char === ',' && depth === 0) {
+            items.push(buf.slice(0, -1).trim());
             buf = '';
         }
     }
-    if (buf) items.push(buf);
+    if (buf.trim()) items.push(buf.trim());
 
     const columns: Column[] = [];
     const pk: string[] = [];
 
     for (const it of items) {
-        // PRIMARY KEY constraint (table-level)
-        const pkTable = it.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
+        // Skip table-level CONSTRAINT declarations
+        if (/^CONSTRAINT\s+/i.test(it)) {
+            // Check if it's a PRIMARY KEY constraint
+            const pkTable = it.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
+            if (pkTable) {
+                pk.push(
+                    ...pkTable[1]
+                        .split(',')
+                        .map(s => trimQ(s.trim()))
+                );
+            }
+            continue;
+        }
+
+        // Skip standalone PRIMARY KEY constraint (table-level without CONSTRAINT keyword)
+        const pkTable = it.match(/^PRIMARY\s+KEY\s*\(([^)]+)\)/i);
         if (pkTable) {
             pk.push(
                 ...pkTable[1]
@@ -60,14 +77,36 @@ function parseColumns(body: string): { columns: Column[]; pk: string[] } {
             continue;
         }
 
-        // column line starts with identifier
+        // Skip CHECK constraints that aren't part of a column definition
+        if (/^CHECK\s*\(/i.test(it)) {
+            continue;
+        }
+
+        // Skip UNIQUE constraints at table level (with multiple columns)
+        if (/^UNIQUE\s*\(/i.test(it)) {
+            continue;
+        }
+
+        // Skip FOREIGN KEY constraints at table level
+        if (/^FOREIGN\s+KEY\s*\(/i.test(it)) {
+            continue;
+        }
+
+        // column line starts with identifier or quoted identifier
         const colMatch = it.match(/^"?([a-zA-Z0-9_]+)"?\s+([^,\s]+(?:\s*\([^)]+\))?)/);
         if (colMatch) {
             const name = trimQ(colMatch[1]);
             const type = colMatch[2].trim();
 
-            const nullable = !/\bNOT\s+NULL\b/i.test(it);
-            const col: Column = { name, type, nullable };
+            const notNull = /\bNOT\s+NULL\b/i.test(it);
+            const nullable = !notNull;
+            const unique = /\bUNIQUE\b/i.test(it);
+
+            // Extract default value - be more careful to avoid grabbing CHECK constraints
+            const defaultMatch = it.match(/DEFAULT\s+([^,\s]+(?:\s*\([^)]*\))?)/i);
+            const defaultValue = defaultMatch ? defaultMatch[1].trim() : undefined;
+
+            const col: Column = { name, type, nullable, notNull, unique, defaultValue };
 
             // inline primary key?
             if (/\bPRIMARY\s+KEY\b/i.test(it)) col.pk = true;
@@ -79,10 +118,10 @@ function parseColumns(body: string): { columns: Column[]; pk: string[] } {
 }
 
 function parseAlterFKs(sql: string): ForeignKey[] {
-    // ALTER TABLE <ident> ADD CONSTRAINT <name> FOREIGN KEY (col) REFERENCES <ident> (col)
+    // ALTER TABLE <ident> ADD CONSTRAINT <name> FOREIGN KEY (col) REFERENCES <ident> (col) [ON DELETE ...] [ON UPDATE ...]
     const fks: ForeignKey[] = [];
     const re =
-        /ALTER\s+TABLE\s+([\s\S]*?)\s+ADD\s+CONSTRAINT\s+([\s\S]*?)\s+FOREIGN\s+KEY\s*\(([\s\S]*?)\)\s+REFERENCES\s+([\s\S]*?)\s*\(([\s\S]*?)\)/gi;
+        /ALTER\s+TABLE\s+([\s\S]*?)\s+ADD\s+CONSTRAINT\s+([\s\S]*?)\s+FOREIGN\s+KEY\s*\(([\s\S]*?)\)\s+REFERENCES\s+([\s\S]*?)\s*\(([\s\S]*?)\)(.*?)(?=;|ALTER|CREATE|$)/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(sql)) !== null) {
         const from = normalizeIdent(m[1].trim());
@@ -94,6 +133,11 @@ function parseAlterFKs(sql: string): ForeignKey[] {
         const toCols = m[5]
             .split(',')
             .map(s => trimQ(s.trim()));
+        const options = m[6] || '';
+
+        // Extract ON DELETE and ON UPDATE
+        const onDeleteMatch = options.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+        const onUpdateMatch = options.match(/ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
 
         // zip pairs (most schemas are 1:1)
         for (let i = 0; i < Math.min(fromCols.length, toCols.length); i++) {
@@ -103,6 +147,8 @@ function parseAlterFKs(sql: string): ForeignKey[] {
                 fromColumn: fromCols[i],
                 toTable: toIdent.schema ? `${toIdent.schema}.${toIdent.table}` : toIdent.table,
                 toColumn: toCols[i],
+                onDelete: onDeleteMatch ? onDeleteMatch[1].toUpperCase() : undefined,
+                onUpdate: onUpdateMatch ? onUpdateMatch[1].toUpperCase() : undefined,
             });
         }
     }

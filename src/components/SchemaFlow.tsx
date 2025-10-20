@@ -20,7 +20,14 @@ import { Button } from "./ui/button";
 
 const nodeTypes = { table: TableNode };
 
-export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
+interface SchemaFlowProps {
+    graph: SchemaGraph;
+    searchQuery?: string;
+    onInit?: (instance: any) => void;
+    onNodeDoubleClick?: (tableName: string) => void;
+}
+
+export default function SchemaFlow({ graph, searchQuery = "", onInit, onNodeDoubleClick }: SchemaFlowProps) {
     const initialNodesEdges = useMemo(() => {
         // First, calculate which columns have connections
         const columnConnections = new Map<string, Set<string>>();
@@ -92,19 +99,47 @@ export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodesEdges.nodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialNodesEdges.edges);
 
+    // Filter nodes based on search query
+    const filteredNodes = useMemo(() => {
+        if (!searchQuery) return nodes;
+
+        const query = searchQuery.toLowerCase();
+        return nodes.map(node => {
+            const tableName = node.data.title.toLowerCase();
+            const hasMatchingColumn = node.data.columns.some((col: any) =>
+                col.name.toLowerCase().includes(query) ||
+                col.type.toLowerCase().includes(query)
+            );
+            const matches = tableName.includes(query) || hasMatchingColumn;
+
+            return {
+                ...node,
+                hidden: !matches,
+            };
+        });
+    }, [nodes, searchQuery]);
+
     const onLayout = useCallback((direction: "TB" | "LR" | "RL" | "BT") => {
         const layouted = layout(nodes, edges, direction);
         setNodes([...layouted.nodes]);
         setEdges([...layouted.edges]);
     }, [nodes, edges, setNodes, setEdges]);
 
+    const handleNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
+        if (onNodeDoubleClick) {
+            onNodeDoubleClick(node.data.title);
+        }
+    }, [onNodeDoubleClick]);
+
     return (
         <div className="h-full w-full">
             <ReactFlow
-                nodes={nodes}
+                nodes={filteredNodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
+                onInit={onInit}
+                onNodeDoubleClick={handleNodeDoubleClick}
                 nodeTypes={nodeTypes}
                 fitView
                 className="bg-zinc-950"
@@ -133,13 +168,13 @@ export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
                 />
 
                 {/* Layout Controls */}
-                <Panel position="top-right" className="flex gap-2 m-2">
+                <Panel position="top-right" className="flex gap-2 m-2 pointer-events-auto">
                     <div className="bg-zinc-900/95 border border-zinc-800 rounded-lg shadow-xl p-1 flex gap-1">
                         <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => onLayout("LR")}
-                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white"
+                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white pointer-events-auto"
                             title="Layout: Left to Right"
                         >
                             <AlignHorizontalDistributeCenter className="w-4 h-4" />
@@ -149,7 +184,7 @@ export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
                             variant="ghost"
                             size="sm"
                             onClick={() => onLayout("TB")}
-                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white"
+                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white pointer-events-auto"
                             title="Layout: Top to Bottom"
                         >
                             <AlignVerticalDistributeCenter className="w-4 h-4" />
@@ -159,7 +194,7 @@ export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
                             variant="ghost"
                             size="sm"
                             onClick={() => onLayout("RL")}
-                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white"
+                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white pointer-events-auto"
                             title="Layout: Right to Left"
                         >
                             <AlignHorizontalDistributeCenter className="w-4 h-4 rotate-180" />
@@ -169,7 +204,7 @@ export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
                             variant="ghost"
                             size="sm"
                             onClick={() => onLayout("BT")}
-                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white"
+                            className="text-zinc-100 hover:bg-zinc-800 hover:text-white pointer-events-auto"
                             title="Layout: Bottom to Top"
                         >
                             <AlignVerticalDistributeCenter className="w-4 h-4 rotate-180" />

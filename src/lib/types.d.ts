@@ -2,7 +2,11 @@ export type Column = {
     name: string;
     type: string;
     pk?: boolean;
-    nullable?: boolean; // best-effort
+    nullable?: boolean;
+    notNull?: boolean;
+    unique?: boolean;
+    defaultValue?: string;
+    comment?: string;
 };
 
 export type ForeignKey = {
@@ -11,6 +15,8 @@ export type ForeignKey = {
     toTable: string;
     toColumn: string;
     name?: string;
+    onDelete?: string;
+    onUpdate?: string;
 };
 
 export type Table = {
@@ -18,6 +24,8 @@ export type Table = {
     schema?: string | null; // writer_schema
     columns: Column[];
     pk?: string[];          // primary key column names
+    indexes?: string[];     // index names
+    comment?: string;
 };
 
 export type SchemaGraph = {

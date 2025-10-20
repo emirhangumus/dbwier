@@ -1,6 +1,6 @@
 // src/TableNode.tsx
 import { Handle, Position, type NodeProps } from "reactflow";
-import { Key, Hash } from "lucide-react";
+import { Key, Hash, Asterisk, Shield } from "lucide-react";
 
 type Data = {
     title: string;
@@ -9,10 +9,24 @@ type Data = {
         type: string;
         pk?: boolean;
         nullable?: boolean;
+        unique?: boolean;
+        defaultValue?: string;
         hasSourceHandle?: boolean;
         hasTargetHandle?: boolean;
     }[];
 };
+
+// Get color based on data type
+function getTypeColor(type: string): string {
+    const t = type.toLowerCase();
+    if (t.includes('int') || t.includes('serial') || t.includes('number')) return 'text-blue-400';
+    if (t.includes('varchar') || t.includes('text') || t.includes('char')) return 'text-green-400';
+    if (t.includes('bool')) return 'text-purple-400';
+    if (t.includes('date') || t.includes('time')) return 'text-orange-400';
+    if (t.includes('json')) return 'text-yellow-400';
+    if (t.includes('uuid')) return 'text-pink-400';
+    return 'text-zinc-500';
+}
 
 export default function TableNode({ data, selected }: NodeProps<Data>) {
     return (
@@ -35,23 +49,34 @@ export default function TableNode({ data, selected }: NodeProps<Data>) {
                 {data.columns.map((c, index) => (
                     <div
                         key={`${data.title}-${c.name}-${index}`}
-                        className="relative px-3 py-2 flex items-center gap-2.5 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/30 last:border-b-0"
+                        className="relative px-3 py-2 flex items-center gap-2 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/30 last:border-b-0"
                     >
-                        {/* Icon for PK */}
-                        {c.pk ? (
-                            <Key className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
-                        ) : (
-                            <Hash className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
-                        )}
+                        {/* Icon for PK / Unique / Regular */}
+                        <div title={c.pk ? "Primary Key" : c.unique ? "Unique" : ""}>
+                            {c.pk ? (
+                                <Key className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                            ) : c.unique ? (
+                                <Shield className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                            ) : (
+                                <Hash className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+                            )}
+                        </div>
 
                         {/* Column Name */}
-                        <span className={`text-xs font-medium flex-1 ${c.pk ? 'text-zinc-100' : 'text-zinc-300'}`}>
+                        <span className={`text-xs font-medium flex-1 truncate ${c.pk ? 'text-zinc-100' : 'text-zinc-300'}`} title={c.name}>
                             {c.name}
                         </span>
 
-                        {/* Type */}
-                        <span className="text-[10px] text-zinc-500 font-mono">
-                            {c.type}
+                        {/* NOT NULL indicator */}
+                        {!c.nullable && !c.pk && (
+                            <div title="NOT NULL">
+                                <Asterisk className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                            </div>
+                        )}
+
+                        {/* Type with color */}
+                        <span className={`text-[10px] font-mono shrink-0 ${getTypeColor(c.type)}`} title={c.type}>
+                            {c.type.length > 10 ? c.type.substring(0, 10) + '...' : c.type}
                         </span>
 
                         {/* Connection handles for each column - only show if connected */}
