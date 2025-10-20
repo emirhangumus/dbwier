@@ -22,17 +22,51 @@ const nodeTypes = { table: TableNode };
 
 export default function SchemaFlow({ graph }: { graph: SchemaGraph }) {
     const initialNodesEdges = useMemo(() => {
-        const nodes: Node[] = graph.tables.map((t) => ({
-            id: t.name,
-            type: "table",
-            data: { title: t.name, columns: t.columns },
-            position: { x: 0, y: 0 },
-        }));
+        // First, calculate which columns have connections
+        const columnConnections = new Map<string, Set<string>>();
+
+        graph.fks.forEach((fk) => {
+            // Track source columns
+            const sourceKey = `${fk.fromTable}.${fk.fromColumn}`;
+            if (!columnConnections.has(sourceKey)) {
+                columnConnections.set(sourceKey, new Set());
+            }
+            columnConnections.get(sourceKey)!.add('source');
+
+            // Track target columns
+            const targetKey = `${fk.toTable}.${fk.toColumn}`;
+            if (!columnConnections.has(targetKey)) {
+                columnConnections.set(targetKey, new Set());
+            }
+            columnConnections.get(targetKey)!.add('target');
+        });
+
+        const nodes: Node[] = graph.tables.map((t) => {
+            // Add connection info for each column
+            const columnsWithConnections = t.columns.map(col => {
+                const colKey = `${t.name}.${col.name}`;
+                const connections = columnConnections.get(colKey);
+                return {
+                    ...col,
+                    hasSourceHandle: connections?.has('source') || false,
+                    hasTargetHandle: connections?.has('target') || false,
+                };
+            });
+
+            return {
+                id: t.name,
+                type: "table",
+                data: { title: t.name, columns: columnsWithConnections },
+                position: { x: 0, y: 0 },
+            };
+        });
 
         const edges: Edge[] = graph.fks.map((f, i) => ({
             id: `fk-${f.fromTable}-${f.fromColumn}-${f.toTable}-${f.toColumn}-${i}`,
             source: f.fromTable,
+            sourceHandle: `${f.fromColumn}-source`,
             target: f.toTable,
+            targetHandle: `${f.toColumn}-target`,
             label: f.name || `${f.fromColumn} → ${f.toColumn}`,
             animated: false,
             type: 'smoothstep',
