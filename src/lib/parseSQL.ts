@@ -197,21 +197,53 @@ export function parsePostgresSchema(sql: string): SchemaGraph {
 
     const fks = parseAlterFKs(sql);
 
-    // also try to capture inline REFERENCES inside CREATE TABLE body
-    const inlineRefRe =
-        /"?([a-zA-Z0-9_]+)"?\s+[^,]*?\bREFERENCES\b\s+(["\w.]+)\s*\(\s*"?([a-zA-Z0-9_]+)"?\s*\)/gi;
+    // Parse inline table-level FOREIGN KEY constraints inside CREATE TABLE
+    // FOREIGN KEY (col) REFERENCES table(col) [ON DELETE ...] [ON UPDATE ...]
     for (const { header, body } of creates) {
         const hdrMatch = header.match(/("?[\w.]+"?)/);
         if (!hdrMatch) continue;
         const from = normalizeIdent(hdrMatch[1]);
+
+        const tableFKRe = /FOREIGN\s+KEY\s*\(\s*"?([a-zA-Z0-9_]+)"?\s*\)\s+REFERENCES\s+(["\w.]+)\s*\(\s*"?([a-zA-Z0-9_]+)"?\s*\)((?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*)/gi;
         let m: RegExpExecArray | null;
-        while ((m = inlineRefRe.exec(body)) !== null) {
-            const to = normalizeIdent(m[2]);
+        while ((m = tableFKRe.exec(body)) !== null) {
+            const toIdent = normalizeIdent(m[2]);
+            const options = m[4] || '';
+
+            const onDeleteMatch = options.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+            const onUpdateMatch = options.match(/ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+
+            fks.push({
+                fromTable: from.schema ? `${from.schema}.${from.table}` : from.table,
+                fromColumn: trimQ(m[1]),
+                toTable: toIdent.schema ? `${toIdent.schema}.${toIdent.table}` : toIdent.table,
+                toColumn: trimQ(m[3]),
+                onDelete: onDeleteMatch ? onDeleteMatch[1].toUpperCase() : undefined,
+                onUpdate: onUpdateMatch ? onUpdateMatch[1].toUpperCase() : undefined,
+            });
+        }
+    }
+
+    // Also try to capture column-level inline REFERENCES (e.g., author_id INTEGER REFERENCES Authors(id))
+    // Make sure NOT to match table-level FOREIGN KEY by checking the pattern starts with column name + type
+    for (const { header, body } of creates) {
+        const hdrMatch = header.match(/("?[\w.]+"?)/);
+        if (!hdrMatch) continue;
+        const from = normalizeIdent(hdrMatch[1]);
+
+        // Remove table-level FOREIGN KEY constraints from body first to avoid matching them
+        const bodyWithoutTableFK = body.replace(/FOREIGN\s+KEY\s*\([^)]+\)\s+REFERENCES[^,;)]+/gi, '');
+
+        const inlineRefRe = /"?([a-zA-Z0-9_]+)"?\s+([A-Z][A-Z0-9_()]*)[^,]*?\bREFERENCES\b\s+(["\w.]+)\s*\(\s*"?([a-zA-Z0-9_]+)"?\s*\)/gi;
+        let m: RegExpExecArray | null;
+        while ((m = inlineRefRe.exec(bodyWithoutTableFK)) !== null) {
+            // m[1] = column name, m[2] = data type, m[3] = referenced table, m[4] = referenced column
+            const to = normalizeIdent(m[3]);
             fks.push({
                 fromTable: from.schema ? `${from.schema}.${from.table}` : from.table,
                 fromColumn: trimQ(m[1]),
                 toTable: to.schema ? `${to.schema}.${to.table}` : to.table,
-                toColumn: trimQ(m[3]),
+                toColumn: trimQ(m[4]),
             });
         }
     }
