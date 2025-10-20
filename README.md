@@ -6,6 +6,8 @@ A modern, interactive PostgreSQL schema visualizer built with React, ReactFlow, 
 ![React](https://img.shields.io/badge/react-19-blue.svg)
 ![TypeScript](https://img.shields.io/badge/typescript-5.0-blue.svg)
 
+![DBwier Screenshot](screenshot.png)
+
 ## ✨ Features
 
 ### 🎨 Visual Design
