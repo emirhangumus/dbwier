@@ -119,37 +119,50 @@ function parseColumns(body: string): { columns: Column[]; pk: string[] } {
 
 function parseAlterFKs(sql: string): ForeignKey[] {
     // ALTER TABLE <ident> ADD CONSTRAINT <name> FOREIGN KEY (col) REFERENCES <ident> (col) [ON DELETE ...] [ON UPDATE ...]
+    // This handles both single and multiple ADD CONSTRAINT in one ALTER TABLE statement
     const fks: ForeignKey[] = [];
-    const re =
-        /ALTER\s+TABLE\s+([\s\S]*?)\s+ADD\s+CONSTRAINT\s+([\s\S]*?)\s+FOREIGN\s+KEY\s*\(([\s\S]*?)\)\s+REFERENCES\s+([\s\S]*?)\s*\(([\s\S]*?)\)(.*?)(?=;|ALTER|CREATE|$)/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(sql)) !== null) {
-        const from = normalizeIdent(m[1].trim());
-        const name = trimQ(m[2].trim());
-        const fromCols = m[3]
-            .split(',')
-            .map(s => trimQ(s.trim()));
-        const toIdent = normalizeIdent(m[4].trim());
-        const toCols = m[5]
-            .split(',')
-            .map(s => trimQ(s.trim()));
-        const options = m[6] || '';
 
-        // Extract ON DELETE and ON UPDATE
-        const onDeleteMatch = options.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
-        const onUpdateMatch = options.match(/ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+    // First, find all ALTER TABLE blocks
+    const alterTableRe = /ALTER\s+TABLE\s+([\w."]+)\s+([\s\S]*?)(?=;)/gi;
+    let alterMatch: RegExpExecArray | null;
 
-        // zip pairs (most schemas are 1:1)
-        for (let i = 0; i < Math.min(fromCols.length, toCols.length); i++) {
-            fks.push({
-                name,
-                fromTable: from.schema ? `${from.schema}.${from.table}` : from.table,
-                fromColumn: fromCols[i],
-                toTable: toIdent.schema ? `${toIdent.schema}.${toIdent.table}` : toIdent.table,
-                toColumn: toCols[i],
-                onDelete: onDeleteMatch ? onDeleteMatch[1].toUpperCase() : undefined,
-                onUpdate: onUpdateMatch ? onUpdateMatch[1].toUpperCase() : undefined,
-            });
+    while ((alterMatch = alterTableRe.exec(sql)) !== null) {
+        const tableName = alterMatch[1].trim();
+        const alterBody = alterMatch[2];
+
+        const from = normalizeIdent(tableName);
+
+        // Now find all ADD CONSTRAINT ... FOREIGN KEY within this ALTER TABLE
+        const constraintRe = /ADD\s+CONSTRAINT\s+([\w."]+)\s+FOREIGN\s+KEY\s*\(([\s\S]*?)\)\s+REFERENCES\s+([\w."]+)\s*\(([\s\S]*?)\)((?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*)/gi;
+        let constMatch: RegExpExecArray | null;
+
+        while ((constMatch = constraintRe.exec(alterBody)) !== null) {
+            const name = trimQ(constMatch[1].trim());
+            const fromCols = constMatch[2]
+                .split(',')
+                .map(s => trimQ(s.trim()));
+            const toIdent = normalizeIdent(constMatch[3].trim());
+            const toCols = constMatch[4]
+                .split(',')
+                .map(s => trimQ(s.trim()));
+            const options = constMatch[5] || '';
+
+            // Extract ON DELETE and ON UPDATE
+            const onDeleteMatch = options.match(/ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+            const onUpdateMatch = options.match(/ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/i);
+
+            // zip pairs (most schemas are 1:1)
+            for (let i = 0; i < Math.min(fromCols.length, toCols.length); i++) {
+                fks.push({
+                    name,
+                    fromTable: from.schema ? `${from.schema}.${from.table}` : from.table,
+                    fromColumn: fromCols[i],
+                    toTable: toIdent.schema ? `${toIdent.schema}.${toIdent.table}` : toIdent.table,
+                    toColumn: toCols[i],
+                    onDelete: onDeleteMatch ? onDeleteMatch[1].toUpperCase() : undefined,
+                    onUpdate: onUpdateMatch ? onUpdateMatch[1].toUpperCase() : undefined,
+                });
+            }
         }
     }
     return fks;
