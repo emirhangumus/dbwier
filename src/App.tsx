@@ -176,7 +176,7 @@ export default function App() {
                 Paste your CREATE TABLE and ALTER TABLE statements to visualize your schema.
               </SheetDescription>
             </SheetHeader>
-            <div className="mt-6 space-y-4">
+            <div className="mt-6 space-y-4 px-4">
               <textarea
                 value={sql}
                 onChange={(e) => setSql(e.target.value)}
@@ -287,7 +287,7 @@ export default function App() {
           </SheetHeader>
 
           {tableDetails && (
-            <div className="mt-6 space-y-6">
+            <div className="mt-6 space-y-6 px-4">
               {/* Columns Section */}
               <div>
                 <h3 className="text-sm font-semibold text-zinc-100 mb-3 flex items-center gap-2">
